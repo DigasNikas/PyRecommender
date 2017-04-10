@@ -74,9 +74,9 @@ def main(data_source, users_source, apps_source, output, number_recs):
     apps_names = sc.broadcast(apps_data)
 
     def construct_string(x):
-        item = "\"" + str(apps_names.value[x[0]]) + "\""
-        recs = [("\"" + str(users_names.value[y[1]]) + "\"", y[2]) for y in x[1]]
-        string = item + "," + str(recs)
+        item = "\"{}\"".format(str(apps_names.value[x[0]]))
+        recs = [("\"{}\"".format(str(users_names.value[y[1]])), y[2]) for y in x[1]]
+        string = "{},{}".format(item, str(recs))
         return string.replace("[", "").replace("]", "").replace("\\", "").replace("'", "").replace(" ", "")
 
     recRDD = model.recommendUsersForProducts(int(number_recs)).map(construct_string)

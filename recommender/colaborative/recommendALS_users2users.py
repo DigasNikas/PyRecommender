@@ -96,9 +96,9 @@ def main(data_source, users_source, output, number_recs):
         order = int(number_recs)
         for item in x[1]:
             if item != x[0]:
-                array.append("(\"" + names.value[item] + "\"," + str(order) + ")")
+                array.append("(\"{}\",{})".format(names.value[item], str(order)))
                 order -= 1
-        result = ("\"" + names.value[x[0]] + "\"," + str(array)).replace(" ", "").replace("[", "").replace("]", "").replace("'", "")
+        result = "\"{}\",{}".format(names.value[x[0]], str(array)).replace(" ", "").replace("[", "").replace("]", "").replace("'", "")
         return result
 
     similarRDD = model.productFeatures().mapPartitions(find_neighbors)

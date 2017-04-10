@@ -89,7 +89,7 @@ def _train(ds, output, number_recs, logfile):
 
             descriptions = [(ds['description'][i]) for i in similar_indices]
             ngrams = count_ngrams(descriptions)
-            outf.write('"' + ds['id'][idx] + '"')
+            outf.write('"{}"'.format(ds['id'][idx]))
             print_most_frequent(ngrams, outf)
 
 
@@ -140,15 +140,16 @@ def print_most_frequent(ngrams, outf, num=10):
     Print num most common n-grams of each length in n-grams dict.
     """
     for n in sorted(ngrams):
-        outf.write(",(")
+        result_string = ",("
         k = 1
         for gram, count in ngrams[n].most_common(num):
-            outf.write('"{0}":{1}'.format(' '.join(gram), count))
+            result_string += '"{0}":{1}'.format(' '.join(gram), count)
             if k != num:
-                outf.write(",")
+                result_string += ","
             k += 1
-        outf.write(")")
-    outf.write("\n")
+        result_string += ")"
+    result_string += "\n"
+    outf.write(result_string)
 
 
 def clean(raw):

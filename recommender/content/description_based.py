@@ -95,11 +95,11 @@ def _train(ds, output, number_recs, logfile):
             similar_items = [(cosine_similarities[idx][i], ds['id'][i])
                              for i in similar_indices]
 
-            outf.write('"'+ds['id'][idx]+'"')
+            result_string = '"{}"'.format(ds['id'][idx])
             for similar_item in similar_items:
                 if similar_item[1] != ds['id'][idx]:
-                    outf.write(',("'+str(similar_item[1])+'",'+str(similar_item[0])+')')
-            outf.write("\n")
+                    result_string += ',("{}",{})'.format(str(similar_item[1]), str(similar_item[0]))
+            outf.write(result_string+"\n")
 
 
 if __name__ == '__main__':

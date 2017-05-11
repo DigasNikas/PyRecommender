@@ -21,36 +21,31 @@ from pyspark import SparkFiles
 from annoy import AnnoyIndex
 import sys
 import csv
+from prepare_data import prepare_data
+import os
 
 
-def main(data_source, names_source, output, number_recs):
-
-    names_data = {}
-    with open(names_source) as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            names_data[int(row["id"]) - 1] = row["app"]
-            # indexes in annoy start at 0
+def main(months, output_path, number_recs):
 
     # This should be changed if running on cluster
     conf = SparkConf().setMaster("local[*]").setAppName("AptoideALS")
 
     sc = SparkContext(conf=conf)
     sc.setLogLevel("OFF")
-    # Load and parse the data
-    data = sc.textFile(data_source)
+    # Load and parse the data if path doesn't exist
+    data = prepare_data(sc, months, output_path)
     ratings = data.map(lambda l: l.split(','))\
         .map(lambda l: Rating(int(l[0]), int(l[1]), float(l[2]))).cache()
 
     # Build the recommendation model using Alternating Least Squares
     seed = 5L
-    iterations = 10
+    iterations = 12
     # Is a basic L2 Regularizer to reduce overfitting
-    regularization_parameter = 0.1
+    regularization_parameter = 0.00001
     # Number of features used to describe items
-    rank = 50
+    rank = 120
     # Is the confidence that we have that the user likes the item
-    alpha = 100.0
+    alpha = 1000.0
 
     model = ALS.trainImplicit(ratings,
                               rank,
@@ -79,6 +74,14 @@ def main(data_source, names_source, output, number_recs):
     index.save("index.ann")
     sc.addPyFile("index.ann")
 
+    os.system("aws s3 cp {}apps/part-00000 apps".format(output_path))
+    names_data = {}
+    with open("apps") as csvfile:
+        reader = csv.reader(csvfile)
+        for row in reader:
+            names_data[int(row[1]) - 1] = row[0]
+            # indexes in annoy start at 0
+
     # Broadcast: improve performance by sending once per node rather than a once per task
     names = sc.broadcast(names_data)
 
@@ -103,7 +106,7 @@ def main(data_source, names_source, output, number_recs):
         return result
 
     similarRDD = model.productFeatures().mapPartitions(find_neighbors)
-    similarRDD.map(construct_string).saveAsTextFile(output)
+    similarRDD.map(construct_string).saveAsTextFile(output_path + "/recommendations")
 
 if __name__ == '__main__':
     main(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])

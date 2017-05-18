@@ -23,36 +23,38 @@ import sys
 import csv
 from prepare_data import prepare_data
 import os
+import requests
 
 
 def main(months, output_path, number_recs):
 
     # This should be changed if running on cluster
-    conf = SparkConf().setMaster("local[*]").setAppName("AptoideALS")
+    conf = SparkConf().setAppName("AptoideALS")
 
     sc = SparkContext(conf=conf)
     sc.setLogLevel("OFF")
     # Load and parse the data if path doesn't exist
-    data = prepare_data(sc, months, output_path)
-    ratings = data.map(lambda l: l.split(','))\
-        .map(lambda l: Rating(int(l[0]), int(l[1]), float(l[2]))).cache()
+    data = prepare_data(sc, int(months), output_path)
+    ratings = data.map(lambda l: Rating(int(l[0]), int(l[1]), float(l[2]))).cache()
 
     # Build the recommendation model using Alternating Least Squares
     seed = 5L
     iterations = 12
     # Is a basic L2 Regularizer to reduce overfitting
-    regularization_parameter = 0.00001
+    regularization_parameter = 0.000001
     # Number of features used to describe items
     rank = 120
     # Is the confidence that we have that the user likes the item
     alpha = 1000.0
 
+    print("Training Model")
     model = ALS.trainImplicit(ratings,
                               rank,
                               seed=seed,
                               iterations=iterations,
                               lambda_=regularization_parameter,
                               alpha=alpha)
+    print("Model Trained")
 
     # Evaluate the model on training data
     testdata = ratings.map(lambda p: (p[0], p[1]))
@@ -70,11 +72,12 @@ def main(months, output_path, number_recs):
         # Annoy start at index 0, while Spark starts at index 1. We need to -1 every index
         index.add_item(i-1, vector)
     # n_trees
-    index.build(300)
+    index.build(500)
     index.save("index.ann")
     sc.addPyFile("index.ann")
 
     os.system("aws s3 cp {}apps/part-00000 apps".format(output_path))
+    # os.system("aws s3 cp s3://aptoide-big-data/reco/DN/apps/categories.csv categories")
     names_data = {}
     with open("apps") as csvfile:
         reader = csv.reader(csvfile)
@@ -82,8 +85,15 @@ def main(months, output_path, number_recs):
             names_data[int(row[1]) - 1] = row[0]
             # indexes in annoy start at 0
 
+    '''categories_data = {}
+    with open("categories") as csvfile:
+        reader = csv.reader(csvfile)
+        for row in reader:
+            categories_data[row[0]] = row[1]'''
+
     # Broadcast: improve performance by sending once per node rather than a once per task
     names = sc.broadcast(names_data)
+    '''categories = sc.broadcast(categories_data)'''
 
     # Major function to get recommendations based on features vectors
     # assumes items are numbered 0 ... n-1
@@ -91,25 +101,37 @@ def main(months, output_path, number_recs):
         t = AnnoyIndex(rank)
         t.load(SparkFiles.get("index.ann"))
         # search_k
-        return ((x[0]-1, t.get_nns_by_item(x[0]-1, int(number_recs))) for x in iter)
+        return ((x[0]-1, t.get_nns_by_item(x[0]-1, int(number_recs), search_k=150000)) for x in iter)
 
     # Function to convert into the format required
     # Need to convert inside the RDD so it make us of spark's file writer
     def construct_string(x):
         array = []
         order = int(number_recs)
-        for item in x[1]:
-            if item != x[0]:
-                array.append("(\"{}\",{})".format(names.value[item], str(order)))
-                order -= 1
-        result = "\"{}\",{}".format(names.value[x[0]], str(array)).replace(" ", "").replace("[", "").replace("]", "").replace("'", "")
-        return result
+        url_package_name = "http://ws2.aptoide.com/api/7/apks/groups/get/package_name={}".format(x[0])
+        resp = requests.get(url_package_name).json()
+
+        if resp["info"]["status"] == 'OK':
+            category = resp["datalist"]["list"][0]["name"]
+
+            for item in x[1]:
+                url_package_name = "http://ws2.aptoide.com/api/7/apks/groups/get/package_name={}".format(x[1])
+                resp = requests.get(url_package_name).json()
+
+                if resp["info"]["status"] == 'OK':
+                    app_cate = resp["datalist"]["list"][0]["name"]
+
+                    if item != x[0] and category == app_cate:
+                        array.append("(\"{}\",{})".format(names.value[item], str(order)))
+                        order -= 1
+            result = "\"{}\",{}".format(names.value[x[0]], str(array)).replace(" ", "").replace("[", "").replace("]", "").replace("'", "")
+            return result
 
     similarRDD = model.productFeatures().mapPartitions(find_neighbors)
     similarRDD.map(construct_string).saveAsTextFile(output_path + "/recommendations")
 
 if __name__ == '__main__':
-    main(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
+    main(sys.argv[1], sys.argv[2], sys.argv[3])
 
     '''
 
